@@ -1,130 +1,155 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.drawerlayout.widget.DrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/drawerLayout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="12dp">
+    android:layout_height="match_parent">
 
-    <EditText
-        android:id="@+id/baseUrlInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Base URL (e.g. https://opencode.ai)"
-        android:inputType="textUri" />
-
+    <!-- Main Content -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="horizontal">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
-        <Button
-            android:id="@+id/saveProfileButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Save URL" />
+        <!-- Toolbar -->
+        <com.google.android.material.appbar.MaterialToolbar
+            android:id="@+id/toolbar"
+            android:layout_width="match_parent"
+            android:layout_height="?attr/actionBarSize"
+            android:background="?attr/colorPrimary"
+            app:navigationIcon="@drawable/ic_menu"
+            app:title="OpenCode Chat"
+            app:titleTextColor="@android:color/white" />
 
-        <Button
-            android:id="@+id/loadSpecButton"
-            android:layout_width="0dp"
+        <!-- Connection Status Banner -->
+        <TextView
+            android:id="@+id/connectionBanner"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
+            android:background="#FF9800"
+            android:gravity="center"
+            android:padding="8dp"
+            android:text="Reconnecting..."
+            android:textColor="@android:color/white"
+            android:visibility="gone" />
+
+        <!-- Chat RecyclerView -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/chatRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1"
-            android:text="Load Endpoints" />
+            android:clipToPadding="false"
+            android:padding="8dp" />
+
+        <!-- Input Area -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#EEEEEE"
+            android:orientation="horizontal"
+            android:padding="8dp">
+
+            <EditText
+                android:id="@+id/messageInput"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@android:color/white"
+                android:hint="Type a message..."
+                android:inputType="textMultiLine"
+                android:maxLines="4"
+                android:minHeight="48dp"
+                android:padding="8dp" />
+
+            <Button
+                android:id="@+id/sendButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="Send" />
+
+        </LinearLayout>
 
     </LinearLayout>
 
-    <Spinner
-        android:id="@+id/profileSpinner"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp" />
-
+    <!-- Drawer (Session List) -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:orientation="horizontal">
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@android:color/white"
+        android:orientation="vertical">
 
-        <Button
-            android:id="@+id/createSessionButton"
-            android:layout_width="0dp"
+        <!-- Drawer Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Create Session" />
+            android:background="?attr/colorPrimary"
+            android:orientation="vertical"
+            android:padding="16dp">
 
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Sessions"
+                android:textColor="@android:color/white"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/serverInfoText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="connected to ..."
+                android:textColor="#CCFFFFFF"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <!-- New Session Button -->
         <Button
-            android:id="@+id/loadModelsButton"
-            android:layout_width="0dp"
+            android:id="@+id/newSessionButton"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:layout_weight="1"
-            android:text="Load Models" />
+            android:layout_margin="8dp"
+            android:text="+ New Session" />
+
+        <!-- Session List -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/sessionRecyclerView"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Footer: Settings/Disconnect -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="8dp">
+
+            <Button
+                android:id="@+id/refreshSessionsButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Refresh" />
+
+            <Button
+                android:id="@+id/disconnectButton"
+                style="@style/Widget.MaterialComponents.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Disconnect" />
+
+        </LinearLayout>
+
     </LinearLayout>
 
-    <Spinner
-        android:id="@+id/providerSpinner"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp" />
-
-    <Spinner
-        android:id="@+id/modelSpinner"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp" />
-
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Ready"
-        android:textStyle="bold" />
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="120dp"
-        android:layout_marginTop="8dp">
-
-        <TextView
-            android:id="@+id/endpointsText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Endpoints will appear here" />
-    </ScrollView>
-
-    <EditText
-        android:id="@+id/promptInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:hint="Type your message"
-        android:inputType="textMultiLine"
-        android:minLines="3"
-        android:gravity="start|top" />
-
-    <Button
-        android:id="@+id/sendButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Send Message" />
-
-    <ScrollView
-        android:id="@+id/chatScroll"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="8dp"
-        android:layout_weight="1">
-
-        <TextView
-            android:id="@+id/chatText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Chat log"
-            android:textIsSelectable="true" />
-    </ScrollView>
-
-</LinearLayout>
+</androidx.drawerlayout.widget.DrawerLayout>

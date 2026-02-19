@@ -1,442 +1,396 @@
 package com.example.codeonly
 
+import android.content.Intent
 import android.os.Bundle
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.EditText
-import android.widget.ScrollView
-import android.widget.Spinner
-import android.widget.TextView
+import android.view.View
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.GravityCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.example.codeonly.api.ChatBubble
+import com.example.codeonly.api.OpenCodeClient
+import com.example.codeonly.databinding.ActivityMainBinding
+import com.example.codeonly.ui.ChatAdapter
+import com.example.codeonly.ui.SessionAdapter
+import com.example.codeonly.util.Preferences
+import com.google.android.material.appbar.MaterialToolbar
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.sse.EventSource
-import okhttp3.sse.EventSourceListener
-import okhttp3.sse.EventSources
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
+    private lateinit var binding: ActivityMainBinding
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val client = OkHttpClient()
-    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private lateinit var prefs: Preferences
+    private lateinit var client: OpenCodeClient
+    private lateinit var sessionAdapter: SessionAdapter
+    private lateinit var chatAdapter: ChatAdapter
 
-    private lateinit var baseUrlInput: EditText
-    private lateinit var promptInput: EditText
-    private lateinit var statusText: TextView
-    private lateinit var endpointsText: TextView
-    private lateinit var chatText: TextView
-    private lateinit var chatScroll: ScrollView
-    private lateinit var profileSpinner: Spinner
-    private lateinit var providerSpinner: Spinner
-    private lateinit var modelSpinner: Spinner
-
-    private val profiles = mutableListOf<String>()
-    private val providerItems = mutableListOf<String>()
-    private val modelItems = mutableListOf<String>()
-    private val modelMap = mutableMapOf<String, Pair<String, String>>()
-
-    private lateinit var profileAdapter: ArrayAdapter<String>
-    private lateinit var providerAdapter: ArrayAdapter<String>
-    private lateinit var modelAdapter: ArrayAdapter<String>
-
-    private var sessionId: String? = null
-    private var eventSource: EventSource? = null
-    private var pendingStreamMessageId: String? = null
+    private var sessions = mutableListOf<com.example.codeonly.api.Session>()
+    private var currentSessionId: String? = null
+    private var isStreaming = false
+    private var pendingMessageId: String? = null
+    private var reconnectJob: Job? = null
+    private var currentProviderId: String? = null
+    private var currentModelId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
-        baseUrlInput = findViewById(R.id.baseUrlInput)
-        promptInput = findViewById(R.id.promptInput)
-        statusText = findViewById(R.id.statusText)
-        endpointsText = findViewById(R.id.endpointsText)
-        chatText = findViewById(R.id.chatText)
-        chatScroll = findViewById(R.id.chatScroll)
-        profileSpinner = findViewById(R.id.profileSpinner)
-        providerSpinner = findViewById(R.id.providerSpinner)
-        modelSpinner = findViewById(R.id.modelSpinner)
+        prefs = Preferences(this)
 
-        profileAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, profiles).also {
-            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            profileSpinner.adapter = it
-        }
-        providerAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, providerItems).also {
-            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            providerSpinner.adapter = it
-        }
-        modelAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, modelItems).also {
-            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            modelSpinner.adapter = it
+        if (prefs.baseUrl.isBlank()) {
+            navigateToConnection()
+            return
         }
 
-        baseUrlInput.setText("https://opencode.ai")
-        loadProfiles()
+        client = OpenCodeClient(prefs.baseUrl)
 
-        findViewById<Button>(R.id.saveProfileButton).setOnClickListener {
-            saveCurrentProfile()
-        }
-        findViewById<Button>(R.id.loadSpecButton).setOnClickListener {
-            loadOpenApiSpec()
-        }
-        findViewById<Button>(R.id.createSessionButton).setOnClickListener {
-            createSession()
-        }
-        findViewById<Button>(R.id.sendButton).setOnClickListener {
-            sendMessage()
-        }
-        findViewById<Button>(R.id.loadModelsButton).setOnClickListener {
-            loadProvidersAndModels()
-        }
+        setupToolbar()
+        setupDrawer()
+        setupChat()
+        setupInput()
 
-        profileSpinner.setOnItemSelectedListener(SimpleItemSelectedListener { selected ->
-            if (selected.isNotBlank()) {
-                baseUrlInput.setText(selected)
-            }
-        })
-
-        providerSpinner.setOnItemSelectedListener(SimpleItemSelectedListener {
-            rebuildModelList(it.substringBefore(" "))
-        })
+        loadInitialData()
+        connectEventStream()
     }
 
     override fun onDestroy() {
-        eventSource?.cancel()
+        reconnectJob?.cancel()
+        client.disconnectEventSource()
         scope.cancel()
         super.onDestroy()
     }
 
-    private fun normalizedBaseUrl(): String {
-        return baseUrlInput.text.toString().trim().trimEnd('/')
+    override fun onBackPressed() {
+        if (binding.drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            binding.drawerLayout.closeDrawer(GravityCompat.START)
+        } else {
+            super.onBackPressed()
+        }
     }
 
-    private fun loadOpenApiSpec() {
-        val baseUrl = normalizedBaseUrl()
-        if (baseUrl.isBlank()) {
-            setStatus("Please set a base URL")
-            return
+    private fun setupToolbar() {
+        binding.toolbar.setNavigationOnClickListener {
+            binding.drawerLayout.openDrawer(GravityCompat.START)
         }
-        setStatus("Loading OpenAPI spec...")
+    }
+
+    private fun setupDrawer() {
+        binding.serverInfoText.text = "Connected to ${prefs.baseUrl}"
+
+        sessionAdapter = SessionAdapter(
+            onSessionClick = { session ->
+                selectSession(session.id)
+                binding.drawerLayout.closeDrawer(GravityCompat.START)
+            },
+            onSessionLongClick = { session ->
+                showDeleteSessionDialog(session)
+            }
+        )
+
+        binding.sessionRecyclerView.layoutManager = LinearLayoutManager(this)
+        binding.sessionRecyclerView.adapter = sessionAdapter
+
+        binding.newSessionButton.setOnClickListener {
+            createNewSession()
+        }
+
+        binding.refreshSessionsButton.setOnClickListener {
+            loadSessions()
+        }
+
+        binding.disconnectButton.setOnClickListener {
+            prefs.clear()
+            navigateToConnection()
+        }
+    }
+
+    private fun setupChat() {
+        chatAdapter = ChatAdapter()
+        binding.chatRecyclerView.layoutManager = LinearLayoutManager(this)
+        binding.chatRecyclerView.adapter = chatAdapter
+    }
+
+    private fun setupInput() {
+        binding.sendButton.setOnClickListener {
+            sendMessage()
+        }
+    }
+
+    private fun navigateToConnection() {
+        startActivity(Intent(this, ConnectionActivity::class.java))
+        finish()
+    }
+
+    private fun loadInitialData() {
+        loadSessions()
+        loadProviders()
+    }
+
+    private fun loadSessions() {
         scope.launch {
-            runCatching {
-                val response = getJson("$baseUrl/openapi.json")
-                val paths = response.optJSONObject("paths") ?: JSONObject()
-                val lines = mutableListOf<String>()
-                val keys = paths.keys().asSequence().toList().sorted()
-                for (path in keys) {
-                    val methodsObj = paths.optJSONObject(path) ?: continue
-                    val methods = methodsObj.keys().asSequence()
-                        .map { it.uppercase() }
-                        .filter { it in setOf("GET", "POST", "PUT", "PATCH", "DELETE") }
-                        .sorted()
-                        .joinToString(",")
-                    lines.add(if (methods.isBlank()) path else "$methods $path")
+            try {
+                sessions = client.listSessions().toMutableList()
+                sessionAdapter.submitList(sessions)
+
+                if (currentSessionId == null && sessions.isNotEmpty()) {
+                    selectSession(sessions.first().id)
+                } else if (currentSessionId != null) {
+                    val exists = sessions.any { it.id == currentSessionId }
+                    if (!exists && sessions.isNotEmpty()) {
+                        selectSession(sessions.first().id)
+                    }
                 }
-                lines
-            }.onSuccess { lines ->
-                endpointsText.text = if (lines.isEmpty()) "No endpoints found" else lines.joinToString("\n")
-                setStatus("Loaded ${lines.size} endpoints")
-            }.onFailure { err ->
-                setStatus("Failed to load spec: ${err.message}")
+            } catch (e: Exception) {
+                showError("Failed to load sessions: ${e.message}")
             }
         }
     }
 
-    private fun createSession() {
-        val baseUrl = normalizedBaseUrl()
-        if (baseUrl.isBlank()) {
-            setStatus("Please set a base URL")
-            return
-        }
-        setStatus("Creating session...")
+    private fun loadProviders() {
         scope.launch {
-            runCatching {
-                val response = postJson("$baseUrl/session", JSONObject())
-                val id = response.optString("id", "")
-                if (id.isBlank()) throw IOException("Session ID missing in response")
-                ensureEventStream(baseUrl)
-                id
-            }.onSuccess { id ->
-                sessionId = id
-                appendChat("System", "Session created: $id")
-                setStatus("Session ready")
-            }.onFailure { err ->
-                setStatus("Failed to create session: ${err.message}")
+            try {
+                val providers = client.getProviders()
+                if (providers.all.isNotEmpty()) {
+                    val savedProvider = prefs.lastProviderId
+                    val savedModel = prefs.lastModelId
+
+                    if (savedProvider.isNotBlank() && savedModel.isNotBlank()) {
+                        currentProviderId = savedProvider
+                        currentModelId = savedModel
+                    } else {
+                        val firstProvider = providers.all.first()
+                        currentProviderId = firstProvider.id
+                        val firstModel = firstProvider.models.keys.firstOrNull()
+                        currentModelId = firstModel
+                        if (firstProvider.id.isNotBlank() && firstModel != null) {
+                            prefs.lastProviderId = firstProvider.id
+                            prefs.lastModelId = firstModel
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                showError("Failed to load providers: ${e.message}")
+            }
+        }
+    }
+
+    private fun selectSession(sessionId: String) {
+        currentSessionId = sessionId
+        sessionAdapter.setSelectedSession(sessionId)
+        loadSessionMessages(sessionId)
+
+        val session = sessions.find { it.id == sessionId }
+        binding.toolbar.title = session?.title ?: session?.slug ?: "Session"
+    }
+
+    private fun loadSessionMessages(sessionId: String) {
+        scope.launch {
+            try {
+                val messages = client.getSessionMessages(sessionId)
+                val bubbles = mutableListOf<ChatBubble>()
+
+                for (msg in messages) {
+                    val role = msg.info.role ?: continue
+                    if (role != "user" && role != "assistant") continue
+
+                    val textParts = mutableListOf<String>()
+                    var reasoning: String? = null
+
+                    for (part in msg.parts) {
+                        when (part) {
+                            is com.example.codeonly.api.Part.Text -> textParts.add(part.text)
+                            is com.example.codeonly.api.Part.Reasoning -> reasoning = part.text
+                            else -> {}
+                        }
+                    }
+
+                    if (textParts.isNotEmpty()) {
+                        bubbles.add(ChatBubble(
+                            role = role,
+                            text = textParts.joinToString("\n"),
+                            reasoning = reasoning
+                        ))
+                    }
+                }
+
+                chatAdapter.submitList(bubbles)
+                scrollToBottom()
+            } catch (e: Exception) {
+                showError("Failed to load messages: ${e.message}")
+            }
+        }
+    }
+
+    private fun createNewSession() {
+        scope.launch {
+            try {
+                val session = client.createSession()
+                sessions.add(0, session)
+                sessionAdapter.submitList(sessions.toList())
+                selectSession(session.id)
+                binding.drawerLayout.closeDrawer(GravityCompat.START)
+            } catch (e: Exception) {
+                showError("Failed to create session: ${e.message}")
+            }
+        }
+    }
+
+    private fun showDeleteSessionDialog(session: com.example.codeonly.api.Session) {
+        AlertDialog.Builder(this)
+            .setTitle("Delete Session")
+            .setMessage("Delete \"${session.title}\"?")
+            .setPositiveButton("Delete") { _, _ ->
+                deleteSession(session)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun deleteSession(session: com.example.codeonly.api.Session) {
+        scope.launch {
+            try {
+                client.deleteSession(session.id)
+                sessions.removeAll { it.id == session.id }
+                sessionAdapter.submitList(sessions.toList())
+
+                if (currentSessionId == session.id) {
+                    currentSessionId = null
+                    chatAdapter.submitList(emptyList())
+                    if (sessions.isNotEmpty()) {
+                        selectSession(sessions.first().id)
+                    }
+                }
+            } catch (e: Exception) {
+                showError("Failed to delete session: ${e.message}")
             }
         }
     }
 
     private fun sendMessage() {
-        val baseUrl = normalizedBaseUrl()
-        val sid = sessionId
-        val prompt = promptInput.text.toString().trim()
-        if (baseUrl.isBlank()) {
-            setStatus("Please set a base URL")
-            return
-        }
-        if (sid.isNullOrBlank()) {
-            setStatus("Create a session first")
-            return
-        }
-        if (prompt.isBlank()) {
-            setStatus("Type a message first")
+        val text = binding.messageInput.text.toString().trim()
+        if (text.isBlank()) return
+
+        val sessionId = currentSessionId
+        if (sessionId == null) {
+            showError("No session selected")
             return
         }
 
-        appendChat("You", prompt)
-        promptInput.setText("")
-        setStatus("Sending message...")
+        val providerId = currentProviderId
+        val modelId = currentModelId
+
+        binding.messageInput.setText("")
+        chatAdapter.submitList(chatAdapter.currentList + ChatBubble("user", text))
+        scrollToBottom()
+
+        isStreaming = true
+        val messageId = "msg_${System.currentTimeMillis()}"
+        pendingMessageId = messageId
+
+        chatAdapter.submitList(chatAdapter.currentList + ChatBubble("assistant", "", isStreaming = true))
+        scrollToBottom()
 
         scope.launch {
-            runCatching {
-                val modelSelection = modelSpinner.selectedItem?.toString().orEmpty()
-                val modelPair = modelMap[modelSelection]
-                val body = JSONObject().put(
-                    "parts",
-                    JSONArray().put(JSONObject().put("type", "text").put("text", prompt))
-                )
-                if (modelPair != null) {
-                    body.put(
-                        "model",
-                        JSONObject()
-                            .put("providerID", modelPair.first)
-                            .put("modelID", modelPair.second)
-                    )
-                }
-                val messageId = "msg_${System.currentTimeMillis()}"
-                body.put("messageID", messageId)
-                pendingStreamMessageId = messageId
-                ensureEventStream(baseUrl)
-                postJson("$baseUrl/session/$sid/prompt_async", body)
-                ""
-            }.onSuccess { assistantText ->
-                if (assistantText.isNotBlank()) {
-                    appendChat("OpenCode", assistantText)
-                }
-                setStatus("Message submitted (streaming)")
-            }.onFailure { err ->
-                appendChat("System", "Request failed: ${err.message}")
-                setStatus("Request failed")
+            try {
+                client.sendMessageAsync(sessionId, text, providerId, modelId, messageId)
+            } catch (e: Exception) {
+                isStreaming = false
+                chatAdapter.finishStreaming()
+                showError("Failed to send: ${e.message}")
             }
         }
     }
 
-    private suspend fun getJson(url: String): JSONObject = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url(url).get().build()
-        client.newCall(request).execute().use { response ->
-            val raw = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IOException("HTTP ${response.code}: $raw")
-            }
-            JSONObject(raw)
-        }
-    }
-
-    private suspend fun postJson(url: String, payload: JSONObject): JSONObject = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url(url)
-            .post(payload.toString().toRequestBody(jsonMediaType))
-            .build()
-        client.newCall(request).execute().use { response ->
-            val raw = response.body?.string().orEmpty()
-            if (!response.isSuccessful) {
-                throw IOException("HTTP ${response.code}: $raw")
-            }
-            JSONObject(raw)
-        }
-    }
-
-    private fun extractAssistantText(response: JSONObject): String {
-        val parts = response.optJSONArray("parts") ?: return response.toString(2)
-        val texts = mutableListOf<String>()
-        for (i in 0 until parts.length()) {
-            val obj = parts.optJSONObject(i) ?: continue
-            when (obj.optString("type")) {
-                "text" -> texts.add(obj.optString("text"))
-                "reasoning" -> texts.add(obj.optString("text"))
-            }
-        }
-        return texts.joinToString("\n").trim()
-    }
-
-    private fun ensureEventStream(baseUrl: String) {
-        if (eventSource != null) return
-        val httpUrl = "$baseUrl/event".toHttpUrlOrNull() ?: throw IOException("Invalid base URL")
-        val request = Request.Builder().url(httpUrl).get().build()
-        eventSource = EventSources.createFactory(client).newEventSource(request, object : EventSourceListener() {
-            override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
-                runCatching {
-                    handleSseEvent(data)
-                }
-            }
-
-            override fun onFailure(eventSource: EventSource, t: Throwable?, response: okhttp3.Response?) {
-                runOnUiThread {
-                    setStatus("Event stream disconnected")
-                }
-                this@MainActivity.eventSource = null
-            }
-        })
-    }
-
-    private fun handleSseEvent(data: String) {
-        val payload = JSONObject(data)
-        val eventType = payload.optString("type")
-        if (eventType == "message.part.delta") {
-            val props = payload.optJSONObject("properties") ?: return
-            val sid = props.optString("sessionID")
-            val mid = props.optString("messageID")
-            val delta = props.optString("delta")
-            val currentSid = sessionId ?: return
-            val pendingMid = pendingStreamMessageId
-            if (sid == currentSid && (pendingMid == null || pendingMid == mid) && delta.isNotEmpty()) {
-                runOnUiThread {
-                    appendStreamDelta(delta)
-                }
-            }
-            return
-        }
-        if (eventType == "session.idle") {
-            val props = payload.optJSONObject("properties") ?: return
-            val sid = props.optString("sessionID")
-            if (sid == sessionId) {
-                pendingStreamMessageId = null
-                runOnUiThread { appendChat("System", "Response complete") }
-            }
-        }
-    }
-
-    private fun appendStreamDelta(delta: String) {
-        val current = chatText.text.toString()
-        val marker = "OpenCode:"
-        val next = if (current.endsWith(marker) || current.contains("\n\n$marker")) {
-            "$current$delta"
-        } else {
-            if (current == "Chat log") "$marker$delta" else "$current\n\n$marker$delta"
-        }
-        chatText.text = next
-        chatScroll.post { chatScroll.fullScroll(ScrollView.FOCUS_DOWN) }
-    }
-
-    private fun saveCurrentProfile() {
-        val value = normalizedBaseUrl()
-        if (value.isBlank()) {
-            setStatus("Base URL is empty")
-            return
-        }
-        if (!profiles.contains(value)) {
-            profiles.add(value)
-            profiles.sort()
-            profileAdapter.notifyDataSetChanged()
-        }
-        getSharedPreferences("opencode_profiles", MODE_PRIVATE)
-            .edit()
-            .putStringSet("urls", profiles.toSet())
-            .apply()
-        setStatus("Saved URL profile")
-    }
-
-    private fun loadProfiles() {
-        val saved = getSharedPreferences("opencode_profiles", MODE_PRIVATE)
-            .getStringSet("urls", emptySet())
-            .orEmpty()
-            .toMutableList()
-        if (!saved.contains("https://opencode.ai")) saved.add("https://opencode.ai")
-        profiles.clear()
-        profiles.addAll(saved.sorted())
-        profileAdapter.notifyDataSetChanged()
-    }
-
-    private fun loadProvidersAndModels() {
-        val baseUrl = normalizedBaseUrl()
-        if (baseUrl.isBlank()) {
-            setStatus("Please set a base URL")
-            return
-        }
-        setStatus("Loading providers/models...")
-        scope.launch {
-            runCatching {
-                val response = getJson("$baseUrl/provider")
-                val all = response.optJSONArray("all") ?: JSONArray()
-                val providerToModels = linkedMapOf<String, MutableList<String>>()
-                modelMap.clear()
-                for (i in 0 until all.length()) {
-                    val provider = all.optJSONObject(i) ?: continue
-                    val providerId = provider.optString("id")
-                    if (providerId.isBlank()) continue
-                    val modelsObj = provider.optJSONObject("models") ?: JSONObject()
-                    val models = mutableListOf<String>()
-                    val keys = modelsObj.keys().asSequence().toList().sorted()
-                    for (modelId in keys) {
-                        val model = modelsObj.optJSONObject(modelId)
-                        val modelName = model?.optString("name")?.takeIf { it.isNotBlank() } ?: modelId
-                        val label = "$providerId / $modelId - $modelName"
-                        modelMap[label] = providerId to modelId
-                        models.add(label)
+    private fun connectEventStream() {
+        try {
+            client.connectEventSource(
+                onDelta = { sessionId, messageId, delta ->
+                    if (sessionId == currentSessionId && messageId == pendingMessageId) {
+                        runOnUiThread {
+                            chatAdapter.appendStreamingText(delta)
+                            scrollToBottom()
+                        }
                     }
-                    providerToModels[providerId] = models
+                },
+                onIdle = { sessionId ->
+                    if (sessionId == currentSessionId) {
+                        runOnUiThread {
+                            isStreaming = false
+                            pendingMessageId = null
+                            chatAdapter.finishStreaming()
+                            loadSessions()
+                        }
+                    }
+                },
+                onError = { sessionId, error ->
+                    if (sessionId == currentSessionId) {
+                        runOnUiThread {
+                            isStreaming = false
+                            chatAdapter.finishStreaming()
+                            showError("Error: $error")
+                        }
+                    }
+                },
+                onConnected = {
+                    runOnUiThread {
+                        binding.connectionBanner.visibility = View.GONE
+                    }
+                },
+                onDisconnected = {
+                    runOnUiThread {
+                        scheduleReconnect()
+                    }
                 }
-                providerToModels
-            }.onSuccess { providerToModels ->
-                providerItems.clear()
-                providerItems.addAll(providerToModels.keys)
-                providerAdapter.notifyDataSetChanged()
-                rebuildModelList(providerItems.firstOrNull().orEmpty())
-                setStatus("Loaded ${providerItems.size} providers")
-            }.onFailure { err ->
-                setStatus("Failed loading models: ${err.message}")
+            )
+        } catch (e: Exception) {
+            scheduleReconnect()
+        }
+    }
+
+    private fun scheduleReconnect() {
+        if (reconnectJob?.isActive == true) return
+
+        binding.connectionBanner.visibility = View.VISIBLE
+
+        reconnectJob = scope.launch {
+            var attempt = 0
+            while (isActive) {
+                attempt++
+                val delayTime = minOf(1000L * (1 shl attempt), 30000L)
+                delay(delayTime)
+
+                try {
+                    client.disconnectEventSource()
+                    connectEventStream()
+                    break
+                } catch (e: Exception) {
+                    // continue retrying
+                }
             }
         }
     }
 
-    private fun rebuildModelList(providerId: String) {
-        modelItems.clear()
-        if (providerId.isNotBlank()) {
-            val filtered = modelMap.keys.filter { it.startsWith("$providerId /") }.sorted()
-            modelItems.addAll(filtered)
+    private fun scrollToBottom() {
+        binding.chatRecyclerView.post {
+            val itemCount = chatAdapter.itemCount
+            if (itemCount > 0) {
+                binding.chatRecyclerView.smoothScrollToPosition(itemCount - 1)
+            }
         }
-        modelAdapter.notifyDataSetChanged()
     }
 
-    private fun appendChat(author: String, message: String) {
-        val current = chatText.text.toString()
-        val next = if (current == "Chat log") {
-            "$author: $message"
-        } else {
-            "$current\n\n$author: $message"
-        }
-        chatText.text = next
-        chatScroll.post { chatScroll.fullScroll(ScrollView.FOCUS_DOWN) }
+    private fun showError(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
-
-    private fun setStatus(value: String) {
-        statusText.text = value
-    }
-}
-
-private class SimpleItemSelectedListener(
-    private val onSelected: (String) -> Unit
-) : android.widget.AdapterView.OnItemSelectedListener {
-    override fun onItemSelected(
-        parent: android.widget.AdapterView<*>?,
-        view: android.view.View?,
-        position: Int,
-        id: Long
-    ) {
-        val value = parent?.getItemAtPosition(position)?.toString().orEmpty()
-        onSelected(value)
-    }
-
-    override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
 }
