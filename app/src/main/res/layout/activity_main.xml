@@ -34,12 +34,37 @@
             android:textColor="@android:color/white"
             android:visibility="gone" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#F4F7FA"
+            android:orientation="vertical"
+            android:padding="8dp">
+
+            <TextView
+                android:id="@+id/directoryText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="middle"
+                android:maxLines="1"
+                android:text="Directory: -"
+                android:textColor="#1F2937"
+                android:textSize="12sp" />
+
+            <Spinner
+                android:id="@+id/modelSpinner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp" />
+        </LinearLayout>
+
         <!-- Chat RecyclerView -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/chatRecyclerView"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
+            android:background="#FAFAFA"
             android:clipToPadding="false"
             android:padding="8dp" />
 
@@ -58,6 +83,8 @@
                 android:layout_weight="1"
                 android:background="@android:color/white"
                 android:hint="Type a message..."
+                android:textColor="#111111"
+                android:textColorHint="#6B7280"
                 android:inputType="textMultiLine"
                 android:maxLines="4"
                 android:minHeight="48dp"

@@ -13,6 +13,7 @@
         android:ellipsize="end"
         android:maxLines="2"
         android:text="Session Title"
+        android:textColor="#111111"
         android:textSize="14sp"
         android:textStyle="bold" />
 

@@ -3,19 +3,19 @@ package com.example.codeonly
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.example.codeonly.api.OpenCodeClient
 import com.example.codeonly.databinding.ActivityMainBinding
 import com.example.codeonly.ui.ChatAdapter
 import com.example.codeonly.ui.ChatBubble
 import com.example.codeonly.ui.SessionAdapter
 import com.example.codeonly.util.Preferences
-import com.google.android.material.appbar.MaterialToolbar
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -40,6 +40,9 @@ class MainActivity : AppCompatActivity() {
     private var reconnectJob: Job? = null
     private var currentProviderId: String? = null
     private var currentModelId: String? = null
+    private val modelOptions = mutableListOf<String>()
+    private val modelOptionMap = mutableMapOf<String, Pair<String, String>>()
+    private lateinit var modelAdapter: ArrayAdapter<String>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,6 +61,7 @@ class MainActivity : AppCompatActivity() {
         setupToolbar()
         setupDrawer()
         setupChat()
+        setupModelSelector()
         setupInput()
 
         loadInitialData()
@@ -121,6 +125,24 @@ class MainActivity : AppCompatActivity() {
         binding.chatRecyclerView.adapter = chatAdapter
     }
 
+    private fun setupModelSelector() {
+        modelAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, modelOptions)
+        modelAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.modelSpinner.adapter = modelAdapter
+        binding.modelSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val selected = modelOptions.getOrNull(position) ?: return
+                val pair = modelOptionMap[selected] ?: return
+                currentProviderId = pair.first
+                currentModelId = pair.second
+                prefs.lastProviderId = pair.first
+                prefs.lastModelId = pair.second
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+    }
+
     private fun setupInput() {
         binding.sendButton.setOnClickListener {
             sendMessage()
@@ -133,8 +155,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadInitialData() {
+        loadWorkingDirectory()
         loadSessions()
         loadProviders()
+    }
+
+    private fun loadWorkingDirectory() {
+        scope.launch {
+            try {
+                val pathInfo = client.getPathInfo()
+                val directory = pathInfo?.directory?.ifBlank { null } ?: "Unknown"
+                binding.directoryText.text = "Directory: $directory"
+            } catch (_: Exception) {
+                binding.directoryText.text = "Directory: Unknown"
+            }
+        }
     }
 
     private fun loadSessions() {
@@ -162,6 +197,19 @@ class MainActivity : AppCompatActivity() {
             try {
                 val providers = client.getProviders()
                 if (providers.all.isNotEmpty()) {
+                    modelOptionMap.clear()
+                    modelOptions.clear()
+                    providers.all.forEach { provider ->
+                        provider.models.forEach { (modelId, model) ->
+                            val labelName = model.name?.takeIf { it.isNotBlank() } ?: modelId
+                            val label = "${provider.id} / $labelName ($modelId)"
+                            modelOptionMap[label] = provider.id to modelId
+                            modelOptions.add(label)
+                        }
+                    }
+                    modelOptions.sort()
+                    modelAdapter.notifyDataSetChanged()
+
                     val savedProvider = prefs.lastProviderId
                     val savedModel = prefs.lastModelId
 
@@ -177,6 +225,14 @@ class MainActivity : AppCompatActivity() {
                             prefs.lastProviderId = firstProvider.id
                             prefs.lastModelId = firstModel
                         }
+                    }
+
+                    val targetIndex = modelOptions.indexOfFirst { option ->
+                        val pair = modelOptionMap[option]
+                        pair?.first == currentProviderId && pair.second == currentModelId
+                    }
+                    if (targetIndex >= 0) {
+                        binding.modelSpinner.setSelection(targetIndex)
                     }
                 }
             } catch (e: Exception) {

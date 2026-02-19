@@ -66,7 +66,7 @@ class SessionAdapter(
                 if (isSelected) {
                     itemView.context.getColor(android.R.color.holo_blue_light)
                 } else {
-                    android.R.color.transparent
+                    itemView.context.getColor(android.R.color.transparent)
                 }
             )
 
