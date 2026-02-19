@@ -229,7 +229,7 @@ class MainActivity : AppCompatActivity() {
 
                     val targetIndex = modelOptions.indexOfFirst { option ->
                         val pair = modelOptionMap[option]
-                        pair?.first == currentProviderId && pair.second == currentModelId
+                        pair?.first == currentProviderId && pair?.second == currentModelId
                     }
                     if (targetIndex >= 0) {
                         binding.modelSpinner.setSelection(targetIndex)
