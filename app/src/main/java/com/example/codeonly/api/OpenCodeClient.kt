@@ -2,6 +2,7 @@ package com.example.codeonly.api
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -152,7 +153,7 @@ class OpenCodeClient(private var baseUrl: String) {
                 models = models
             )
         }
-        val defaultMap = response.optJSONObject("default")?.toMap() ?: emptyMap()
+        val defaultMap = response.optJSONObject("default")?.toMapString() ?: emptyMap()
         val connected = response.optJSONArray("connected")?.let { (0 until it.length()).map { k -> it.getString(k) } } ?: emptyList()
         ProvidersResponse(all, defaultMap, connected)
     }
@@ -165,7 +166,7 @@ class OpenCodeClient(private var baseUrl: String) {
         onDisconnected: () -> Unit
     ) {
         disconnectEventSource()
-        val httpUrl = okhttp3.HttpUrl.parse(buildUrl("/event")) 
+        val httpUrl = buildUrl("/event").toHttpUrlOrNull() 
             ?: throw IOException("Invalid event URL")
         val request = Request.Builder().url(httpUrl).get().build()
         eventSource = EventSources.createFactory(client).newEventSource(request, object : EventSourceListener() {
@@ -195,7 +196,7 @@ class OpenCodeClient(private var baseUrl: String) {
                 }
             }
 
-            override fun onOpen(eventSource: EventSource) {
+            override fun onOpen(eventSource: EventSource, response: okhttp3.Response) {
                 onConnected()
             }
 
@@ -210,7 +211,7 @@ class OpenCodeClient(private var baseUrl: String) {
         eventSource = null
     }
 
-    fun isEventSourceConnected(): Boolean = eventSource?.isClosed == false
+    fun isEventSourceConnected(): Boolean = eventSource != null
 
     private suspend fun get(url: String): JSONObject = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).get().build()
