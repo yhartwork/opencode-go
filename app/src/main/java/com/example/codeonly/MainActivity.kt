@@ -9,10 +9,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GravityCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.example.codeonly.api.ChatBubble
 import com.example.codeonly.api.OpenCodeClient
 import com.example.codeonly.databinding.ActivityMainBinding
 import com.example.codeonly.ui.ChatAdapter
+import com.example.codeonly.ui.ChatBubble
 import com.example.codeonly.ui.SessionAdapter
 import com.example.codeonly.util.Preferences
 import com.google.android.material.appbar.MaterialToolbar
