@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -24,14 +26,20 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.codeonly.domain.model.ConnectionState
 import com.example.codeonly.feature.connection.ConnectionIntent
 import com.example.codeonly.feature.connection.ConnectionViewModel
+import com.example.codeonly.util.AppLog
+import com.example.codeonly.util.LogLevel
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(viewModel: ConnectionViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val logEntries by AppLog.entries.collectAsStateWithLifecycle()
     var providerMenuExpanded by remember { mutableStateOf(false) }
     var modelMenuExpanded by remember { mutableStateOf(false) }
     val selectedProvider = state.providers.firstOrNull { it.id == state.selectedProviderId }
     val selectedModel = selectedProvider?.models?.firstOrNull { it.id == state.selectedModelId }
+    val timeFormatter = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault()) }
 
     Column(
         modifier = Modifier
@@ -131,6 +139,35 @@ fun SettingsScreen(viewModel: ConnectionViewModel = viewModel()) {
 
         state.message?.let {
             Text(text = it, style = MaterialTheme.typography.bodySmall)
+        }
+
+        Text("Debug Logs", style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { AppLog.clear() }) {
+                Text("Clear Logs")
+            }
+        }
+        if (logEntries.isEmpty()) {
+            Text("No logs yet", style = MaterialTheme.typography.bodySmall)
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                items(logEntries) { entry ->
+                    val levelLabel = when (entry.level) {
+                        LogLevel.Debug -> "D"
+                        LogLevel.Info -> "I"
+                        LogLevel.Warn -> "W"
+                        LogLevel.Error -> "E"
+                    }
+                    Text(
+                        text = "${timeFormatter.format(entry.time)} $levelLabel/${entry.tag}: ${entry.message}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
         }
     }
 }

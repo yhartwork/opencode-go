@@ -12,6 +12,7 @@ import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
 import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.io.IOException
 
 class OpenCodeClient(private var baseUrl: String) {
@@ -75,8 +76,13 @@ class OpenCodeClient(private var baseUrl: String) {
     }
 
     suspend fun listSessions(): List<Session> = withContext(Dispatchers.IO) {
-        val response = get(buildUrl("/session"))
-        val arr = response as? JSONArray ?: JSONArray()
+        val raw = getRaw(buildUrl("/session"))
+        val parsed = parseJson(raw)
+        val arr = when (parsed) {
+            is JSONArray -> parsed
+            is JSONObject -> parsed.optJSONArray("sessions") ?: JSONArray()
+            else -> JSONArray()
+        }
         (0 until arr.length()).map { parseSession(arr.getJSONObject(it)) }
     }
 
@@ -93,8 +99,13 @@ class OpenCodeClient(private var baseUrl: String) {
     }
 
     suspend fun getSessionMessages(sessionId: String): List<ChatMessage> = withContext(Dispatchers.IO) {
-        val response = get(buildUrl("/session/$sessionId/message"))
-        val arr = response as? JSONArray ?: JSONArray()
+        val raw = getRaw(buildUrl("/session/$sessionId/message"))
+        val parsed = parseJson(raw)
+        val arr = when (parsed) {
+            is JSONArray -> parsed
+            is JSONObject -> parsed.optJSONArray("messages") ?: JSONArray()
+            else -> JSONArray()
+        }
         (0 until arr.length()).map { parseChatMessage(arr.getJSONObject(it)) }
     }
 
@@ -214,17 +225,22 @@ class OpenCodeClient(private var baseUrl: String) {
     fun isEventSourceConnected(): Boolean = eventSource != null
 
     private suspend fun get(url: String): JSONObject = withContext(Dispatchers.IO) {
+        val raw = getRaw(url)
+        return@withContext try {
+            JSONObject(raw)
+        } catch (e: Exception) {
+            JSONObject()
+        }
+    }
+
+    private suspend fun getRaw(url: String): String = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).get().build()
         client.newCall(request).execute().use { response ->
             val raw = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw IOException("HTTP ${response.code}: $raw")
             }
-            try {
-                JSONObject(raw)
-            } catch (e: Exception) {
-                JSONObject()
-            }
+            raw
         }
     }
 
@@ -451,5 +467,15 @@ class OpenCodeClient(private var baseUrl: String) {
 
     private fun JSONArray.toList(): List<Any> {
         return (0 until length()).map { opt(it) }
+    }
+
+    private fun parseJson(raw: String): Any? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+        return try {
+            JSONTokener(trimmed).nextValue()
+        } catch (e: Exception) {
+            null
+        }
     }
 }

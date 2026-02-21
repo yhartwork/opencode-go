@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.codeonly.api.OpenCodeClient
 import com.example.codeonly.api.Part
 import com.example.codeonly.domain.model.SessionListItem
+import com.example.codeonly.util.AppLog
 import com.example.codeonly.util.Preferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +44,7 @@ class ChatsViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(isLoading = true, message = null) }
             val baseUrl = preferences.baseUrl
             if (baseUrl.isBlank()) {
+                AppLog.warn("ChatsViewModel", "Refresh skipped: base URL not set")
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -57,6 +59,7 @@ class ChatsViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val client = OpenCodeClient(baseUrl)
                 val sessions = client.listSessions()
+                AppLog.info("ChatsViewModel", "Loaded ${sessions.size} sessions")
                 val includeDetails = sessions.size <= 20
                 val items = sessions.map { session ->
                     val summary = session.summary
@@ -87,6 +90,7 @@ class ChatsViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             } catch (e: Exception) {
+                AppLog.error("ChatsViewModel", "Failed to load sessions", e)
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -103,6 +107,7 @@ class ChatsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val baseUrl = preferences.baseUrl
             if (baseUrl.isBlank()) {
+                AppLog.warn("ChatsViewModel", "Create session skipped: base URL not set")
                 _uiState.update {
                     it.copy(isLoading = false, message = "No server connected. Configure URL in Settings.")
                 }
@@ -111,9 +116,11 @@ class ChatsViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 val created = OpenCodeClient(baseUrl).createSession()
+                AppLog.info("ChatsViewModel", "Created session ${created.id}")
                 _uiState.update { it.copy(message = "Created session: ${created.title ?: created.slug}") }
                 refresh()
             } catch (e: Exception) {
+                AppLog.error("ChatsViewModel", "Failed to create session", e)
                 _uiState.update {
                     it.copy(isLoading = false, message = "Failed to create session: ${e.message}")
                 }
@@ -125,6 +132,7 @@ class ChatsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val baseUrl = preferences.baseUrl
             if (baseUrl.isBlank()) {
+                AppLog.warn("ChatsViewModel", "Delete session skipped: base URL not set")
                 _uiState.update {
                     it.copy(isLoading = false, message = "No server connected. Configure URL in Settings.")
                 }
@@ -133,11 +141,13 @@ class ChatsViewModel(application: Application) : AndroidViewModel(application) {
 
             try {
                 val ok = OpenCodeClient(baseUrl).deleteSession(sessionId)
+                AppLog.info("ChatsViewModel", "Delete session $sessionId: ${if (ok) "ok" else "failed"}")
                 _uiState.update {
                     it.copy(message = if (ok) "Session deleted." else "Delete failed.")
                 }
                 refresh()
             } catch (e: Exception) {
+                AppLog.error("ChatsViewModel", "Failed to delete session $sessionId", e)
                 _uiState.update {
                     it.copy(isLoading = false, message = "Failed to delete session: ${e.message}")
                 }
