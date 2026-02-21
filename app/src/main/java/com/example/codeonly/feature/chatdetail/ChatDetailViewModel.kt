@@ -122,7 +122,7 @@ class ChatDetailViewModel(
                 return@launch
             }
 
-            val messageId = UUID.randomUUID().toString()
+            val messageId = "msg_" + UUID.randomUUID().toString()
             val providerId = preferences.lastProviderId.takeIf { it.isNotBlank() }
             val modelId = preferences.lastModelId.takeIf { it.isNotBlank() }
 
